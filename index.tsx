@@ -1,5 +1,3 @@
-// @flow
-
 import React from 'react';
 import {
   PanResponder,
@@ -7,32 +5,40 @@ import {
   Dimensions,
   Animated,
   TouchableWithoutFeedback,
+  PanResponderInstance,
+  GestureResponderEvent,
+  PanResponderGestureState,
 } from 'react-native';
-import PropTypes from 'prop-types';
 import styles from './styles';
 
-type WindowDimensions = { width: number, height: number };
+interface WindowDimensions {
+  width: number,
+  height: number
+};
 
-type Props = {
+interface SideMenuProps {
   edgeHitWidth: number,
   toleranceX: number,
   toleranceY: number,
   menuPosition: 'left' | 'right',
-  onChange: Function,
-  onMove: Function,
-  onSliding: Function,
+  onChange: (isOpen: boolean) => void,
+  onMove: (moveOffset: number) => void,
+  onSliding: (left: number) => void,
   openMenuOffset: number,
   hiddenMenuOffset: number,
-  disableGestures: Function | bool,
-  animationFunction: Function,
-  onAnimationComplete: Function,
-  onStartShouldSetResponderCapture: Function,
-  isOpen: bool,
-  bounceBackOnOverdraw: bool,
-  autoClosing: bool
+  disableGestures: boolean,
+  onAnimationComplete: () => void,
+  onStartShouldSetPanResponderCapture: (e: GestureResponderEvent, gestureState: PanResponderGestureState) => boolean,
+  isOpen: boolean,
+  bounceBackOnOverdraw: boolean,
+  autoClosing: boolean,
+  children?: JSX.Element | JSX.Element[],
+  menu?: JSX.Element,
+  animationStyle: (animateValue: Animated.Value) => any,
+  animation: (prop: Animated.Value | Animated.ValueXY, value: number | Animated.Value | Animated.ValueXY) => Animated.CompositeAnimation,
 };
 
-type Event = {
+interface SideMenuEvent {
   nativeEvent: {
     layout: {
       width: number,
@@ -41,7 +47,7 @@ type Event = {
   },
 };
 
-type State = {
+interface SideMenuState {
   width: number,
   height: number,
   openOffsetMenuPercentage: number,
@@ -54,22 +60,50 @@ type State = {
 const deviceScreen: WindowDimensions = Dimensions.get('window');
 const barrierForward: number = deviceScreen.width / 4;
 
-function shouldOpenMenu(dx: number): boolean {
+function shouldOpenMenu(dx: number) {
   return dx > barrierForward;
 }
 
-export default class SideMenu extends React.Component {
-  onLayoutChange: Function;
-  onStartShouldSetResponderCapture: Function;
-  onMoveShouldSetPanResponder: Function;
-  onPanResponderMove: Function;
-  onPanResponderRelease: Function;
-  onPanResponderTerminate: Function;
-  state: State;
+export default class SideMenu extends React.Component<SideMenuProps, SideMenuState> {
+  onStartShouldSetPanResponderCapture: (e: GestureResponderEvent, gestureState: PanResponderGestureState) => boolean;
+  onMoveShouldSetPanResponder: (e: GestureResponderEvent, gestureState: PanResponderGestureState) => boolean;
+  onPanResponderMove: (e: GestureResponderEvent, gestureState: PanResponderGestureState) => void;
+  onPanResponderRelease: (e: GestureResponderEvent, gestureState: PanResponderGestureState) => void;
+  onPanResponderTerminate: (e: GestureResponderEvent, gestureState: PanResponderGestureState) => void;
+  state: SideMenuState;
   prevLeft: number;
+  publicLeft: number;
   isOpen: boolean;
+  responder: PanResponderInstance;
 
-  constructor(props: Props) {
+  static defaultProps: SideMenuProps = {
+    toleranceY: 10,
+    toleranceX: 10,
+    edgeHitWidth: 60,
+    openMenuOffset: deviceScreen.width * (2 / 3),
+    disableGestures: false,
+    menuPosition: 'left',
+    hiddenMenuOffset: 0,
+    onMove: () => null,
+    onStartShouldSetPanResponderCapture: () => true,
+    onChange: () => null,
+    onSliding: () => {},
+    animationStyle: value => ({
+      transform: [{
+        translateX: value,
+      }],
+    }),
+    animation: (prop, value) => Animated.spring(prop, {
+      toValue: value,
+      friction: 8,
+    }),
+    onAnimationComplete: () => {},
+    isOpen: false,
+    bounceBackOnOverdraw: true,
+    autoClosing: true,
+  };
+
+  constructor(props: SideMenuProps) {
     super(props);
 
     this.prevLeft = 0;
@@ -83,13 +117,22 @@ export default class SideMenu extends React.Component {
         ? props.openMenuOffset * initialMenuPositionMultiplier
         : props.hiddenMenuOffset,
     );
+    this.publicLeft = 0;
 
     this.onLayoutChange = this.onLayoutChange.bind(this);
-    this.onStartShouldSetResponderCapture = props.onStartShouldSetResponderCapture.bind(this);
+    this.onStartShouldSetPanResponderCapture = props.onStartShouldSetPanResponderCapture.bind(this);
     this.onMoveShouldSetPanResponder = this.handleMoveShouldSetPanResponder.bind(this);
     this.onPanResponderMove = this.handlePanResponderMove.bind(this);
     this.onPanResponderRelease = this.handlePanResponderEnd.bind(this);
     this.onPanResponderTerminate = this.handlePanResponderEnd.bind(this);
+
+    this.responder = PanResponder.create({
+      onStartShouldSetPanResponderCapture: this.onStartShouldSetPanResponderCapture,
+      onMoveShouldSetPanResponder: this.onMoveShouldSetPanResponder,
+      onPanResponderMove: this.onPanResponderMove,
+      onPanResponderRelease: this.onPanResponderRelease,
+      onPanResponderTerminate: this.onPanResponderTerminate,
+    });
 
     this.state = {
       width: deviceScreen.width,
@@ -101,38 +144,37 @@ export default class SideMenu extends React.Component {
       left,
     };
 
-    this.state.left.addListener(({value}) => this.props.onSliding(Math.abs((value - this.state.hiddenMenuOffset) / (this.state.openMenuOffset - this.state.hiddenMenuOffset))));
-  }
-
-  componentWillMount(): void {
-    this.responder = PanResponder.create({
-      onStartShouldSetResponderCapture: this.onStartShouldSetResponderCapture,
-      onMoveShouldSetPanResponder: this.onMoveShouldSetPanResponder,
-      onPanResponderMove: this.onPanResponderMove,
-      onPanResponderRelease: this.onPanResponderRelease,
-      onPanResponderTerminate: this.onPanResponderTerminate,
+    this.state.left.addListener(({value}) => {
+      this.publicLeft = value;
+      this.props.onSliding(Math.abs((value - this.state.hiddenMenuOffset) / (this.state.openMenuOffset - this.state.hiddenMenuOffset)))
     });
   }
 
-  componentWillReceiveProps(props: Props): void {
+  // componentWillMount() {
+  //   this.responder = PanResponder.create({
+  //     onStartShouldSetPanResponderCapture: this.onStartShouldSetPanResponderCapture,
+  //     onMoveShouldSetPanResponder: this.onMoveShouldSetPanResponder,
+  //     onPanResponderMove: this.onPanResponderMove,
+  //     onPanResponderRelease: this.onPanResponderRelease,
+  //     onPanResponderTerminate: this.onPanResponderTerminate,
+  //   });
+  // }
+
+  componentWillReceiveProps(props: SideMenuProps) {
     if (typeof props.isOpen !== 'undefined' && this.isOpen !== props.isOpen && (props.autoClosing || this.isOpen === false)) {
       this.openMenu(props.isOpen);
     }
   }
 
-  onLayoutChange(e: Event) {
+  onLayoutChange(e: SideMenuEvent) {
     const { width, height } = e.nativeEvent.layout;
     const openMenuOffset = width * this.state.openOffsetMenuPercentage;
     const hiddenMenuOffset = width * this.state.hiddenMenuOffsetPercentage;
     this.setState({ width, height, openMenuOffset, hiddenMenuOffset });
   }
-
-  /**
-   * Get content view. This view will be rendered over menu
-   * @return {React.Component}
-   */
+  
   getContentView() {
-    let overlay: React.Element<void, void> = null;
+    let overlay: JSX.Element = <></>;
 
     if (this.isOpen) {
       overlay = (
@@ -143,7 +185,6 @@ export default class SideMenu extends React.Component {
     }
 
     const { width, height } = this.state;
-    const ref = sideMenu => (this.sideMenu = sideMenu);
     const style = [
       styles.frontView,
       { width, height },
@@ -151,7 +192,7 @@ export default class SideMenu extends React.Component {
     ];
 
     return (
-      <Animated.View style={style} ref={ref} {...this.responder.panHandlers}>
+      <Animated.View style={style} {...this.responder.panHandlers}>
         {this.props.children}
         {overlay}
       </Animated.View>
@@ -162,18 +203,18 @@ export default class SideMenu extends React.Component {
     const newOffset = this.menuPositionMultiplier() * offset;
 
     this.props
-      .animationFunction(this.state.left, newOffset)
+      .animation (this.state.left, newOffset)
       .start(this.props.onAnimationComplete);
 
     this.prevLeft = newOffset;
   }
 
-  menuPositionMultiplier(): -1 | 1 {
+  menuPositionMultiplier() {
     return this.props.menuPosition === 'right' ? -1 : 1;
   }
 
-  handlePanResponderMove(e: Object, gestureState: Object) {
-    if (this.state.left.__getValue() * this.menuPositionMultiplier() >= 0) {
+  handlePanResponderMove(e: GestureResponderEvent, gestureState: PanResponderGestureState) {
+    if (this.publicLeft * this.menuPositionMultiplier() >= 0) {
       let newLeft = this.prevLeft + gestureState.dx;
 
       if (!this.props.bounceBackOnOverdraw && Math.abs(newLeft) > this.state.openMenuOffset) {
@@ -185,14 +226,14 @@ export default class SideMenu extends React.Component {
     }
   }
 
-  handlePanResponderEnd(e: Object, gestureState: Object) {
+  handlePanResponderEnd(e: GestureResponderEvent, gestureState: PanResponderGestureState) {
     const offsetLeft = this.menuPositionMultiplier() *
-      (this.state.left.__getValue() + gestureState.dx);
+      (this.publicLeft + gestureState.dx);
 
     this.openMenu(shouldOpenMenu(offsetLeft));
   }
 
-  handleMoveShouldSetPanResponder(e: any, gestureState: any): boolean {
+  handleMoveShouldSetPanResponder(e: GestureResponderEvent, gestureState: PanResponderGestureState) {
     if (this.gesturesAreEnabled()) {
       const x = Math.round(Math.abs(gestureState.dx));
       const y = Math.round(Math.abs(gestureState.dy));
@@ -214,7 +255,7 @@ export default class SideMenu extends React.Component {
     return false;
   }
 
-  openMenu(isOpen: boolean): void {
+  openMenu(isOpen: boolean) {
     const { hiddenMenuOffset, openMenuOffset } = this.state;
     this.moveLeft(isOpen ? openMenuOffset : hiddenMenuOffset);
     this.isOpen = isOpen;
@@ -223,17 +264,11 @@ export default class SideMenu extends React.Component {
     this.props.onChange(isOpen);
   }
 
-  gesturesAreEnabled(): boolean {
-    const { disableGestures } = this.props;
-
-    if (typeof disableGestures === 'function') {
-      return !disableGestures();
-    }
-
-    return !disableGestures;
+  gesturesAreEnabled() {
+    return !this.props.disableGestures;
   }
 
-  render(): React.Element<void, void> {
+  render() {
     const boundryStyle = this.props.menuPosition === 'right' ?
       { left: this.state.width - this.state.openMenuOffset } :
       { right: this.state.width - this.state.openMenuOffset };
@@ -255,53 +290,3 @@ export default class SideMenu extends React.Component {
     );
   }
 }
-
-SideMenu.propTypes = {
-  edgeHitWidth: PropTypes.number,
-  toleranceX: PropTypes.number,
-  toleranceY: PropTypes.number,
-  menuPosition: PropTypes.oneOf(['left', 'right']),
-  onChange: PropTypes.func,
-  onMove: PropTypes.func,
-  children: PropTypes.node,
-  menu: PropTypes.node,
-  openMenuOffset: PropTypes.number,
-  hiddenMenuOffset: PropTypes.number,
-  animationStyle: PropTypes.func,
-  disableGestures: PropTypes.oneOfType([PropTypes.func, PropTypes.bool]),
-  animationFunction: PropTypes.func,
-  onAnimationComplete: PropTypes.func,
-  onStartShouldSetResponderCapture: PropTypes.func,
-  isOpen: PropTypes.bool,
-  bounceBackOnOverdraw: PropTypes.bool,
-  autoClosing: PropTypes.bool,
-};
-
-SideMenu.defaultProps = {
-  toleranceY: 10,
-  toleranceX: 10,
-  edgeHitWidth: 60,
-  children: null,
-  menu: null,
-  openMenuOffset: deviceScreen.width * (2 / 3),
-  disableGestures: false,
-  menuPosition: 'left',
-  hiddenMenuOffset: 0,
-  onMove: () => {},
-  onStartShouldSetResponderCapture: () => true,
-  onChange: () => {},
-  onSliding: () => {},
-  animationStyle: value => ({
-    transform: [{
-      translateX: value,
-    }],
-  }),
-  animationFunction: (prop, value) => Animated.spring(prop, {
-    toValue: value,
-    friction: 8,
-  }),
-  onAnimationComplete: () => {},
-  isOpen: false,
-  bounceBackOnOverdraw: true,
-  autoClosing: true,
-};

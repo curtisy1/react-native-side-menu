@@ -1,9 +1,7 @@
-// @flow
-
 import { StyleSheet } from 'react-native';
 
 const absoluteStretch = {
-  position: 'absolute',
+  position: "absolute",
   top: 0,
   left: 0,
   bottom: 0,
@@ -13,7 +11,7 @@ const absoluteStretch = {
 export default StyleSheet.create({
   container: {
     ...absoluteStretch,
-    justifyContent: 'center',
+    justifyContent: "center",
   },
   menu: {
     ...absoluteStretch,

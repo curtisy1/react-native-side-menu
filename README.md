@@ -1,13 +1,19 @@
+This is a modified version that is written in and uses TypeScript instead of Flow
+For examples, see the original repository
+
 ## Customizable side menu for react-native
 <p align="center">
   <img src ="http://oi61.tinypic.com/2n9l2dz.jpg" />
 </p>
 
 ### Content
-- [Installation](#installation)
-- [Usage example](#usage-example)
-- [Component props](#component-props)
-- [Questions?](#questions)
+- [Customizable side menu for react-native](#customizable-side-menu-for-react-native)
+  - [Content](#content)
+  - [Installation](#installation)
+  - [Usage example](#usage-example)
+  - [Component props](#component-props)
+  - [FAQ](#faq)
+    - [ScrollView does not scroll to top on status bar press](#scrollview-does-not-scroll-to-top-on-status-bar-press)
 
 ### Installation
 ```bash
@@ -16,7 +22,7 @@ npm install react-native-side-menu --save
 
 ### Usage example
 ```javascript
-const SideMenu = require('react-native-side-menu');
+import SideMenu from 'react-native-side-menu';
 
 class ContentView extends React.Component {
   render() {
@@ -78,6 +84,3 @@ class Application extends React.Component {
 #### ScrollView does not scroll to top on status bar press
 
 On iPhone, the scroll-to-top gesture has no effect if there is more than one scroll view on-screen that has scrollsToTop set to true. Since it defaults to `true` in ReactNative, you have to set `scrollsToTop={false}` on your ScrollView inside `Menu` component in order to get it working as desired.
-
-### Questions?
-Feel free to contact me in [twitter](https://twitter.com/kureevalexey) or [create an issue](https://github.com/Kureev/react-native-side-menu/issues/new)
