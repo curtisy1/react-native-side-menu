@@ -15,6 +15,8 @@ export default StyleSheet.create({
   },
   menu: {
     ...absoluteStretch,
+    flex: 1,
+    backgroundColor: 'transparent',
   },
   frontView: {
     flex: 1,
@@ -26,6 +28,6 @@ export default StyleSheet.create({
   },
   overlay: {
     ...absoluteStretch,
-    backgroundColor: 'transparent',
+    backgroundColor: 'rgba(0,0,0,0.2)',
   },
 });

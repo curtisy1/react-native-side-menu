@@ -37,9 +37,9 @@ interface SideMenuProps {
   isOpen: boolean,
   bounceBackOnOverdraw: boolean,
   autoClosing: boolean,
-  children?: JSX.Element | JSX.Element[],
-  menu?: JSX.Element,
-  animationStyle: (animateValue: Animated.Value) => any,
+  children: JSX.Element | JSX.Element[],
+  menu: JSX.Element,
+  animationStyle: (animateValue: Animated.Value, interpolation: Animated.AnimatedInterpolation) => any,
   animation: (prop: Animated.Value | Animated.ValueXY, value: number | Animated.Value | Animated.ValueXY) => Animated.CompositeAnimation,
 };
 
@@ -53,11 +53,11 @@ interface SideMenuState {
   left: Animated.Value,
   isOpen: boolean;
   prevLeft: number;
+  barrierForward: number;
 };
 
 const deviceScreen = Dimensions.get('window');
-const barrierForward = deviceScreen.width / 4;
-const shouldOpenMenu = (dx: number) => dx > barrierForward;
+const shouldOpenMenu = (dx: number, barrierForward: number) => dx > barrierForward;
 
 export default class SideMenu extends React.Component<SideMenuProps, SideMenuState> {
   onStartShouldSetPanResponderCapture: (e: GestureResponderEvent, gestureState: PanResponderGestureState) => boolean;
@@ -88,11 +88,14 @@ export default class SideMenu extends React.Component<SideMenuProps, SideMenuSta
     animation: (prop, value) => Animated.spring(prop, {
       toValue: value,
       friction: 8,
+      useNativeDriver: true
     }),
     onAnimationComplete: () => null,
     isOpen: false,
     bounceBackOnOverdraw: true,
     autoClosing: true,
+    menu: <></>,
+    children: <></>
   };
 
   constructor(props: SideMenuProps) {
@@ -105,8 +108,8 @@ export default class SideMenu extends React.Component<SideMenuProps, SideMenuSta
     const hiddenMenuOffsetPercentage = props.hiddenMenuOffset / deviceScreen.width;
     const left: Animated.Value = new Animated.Value(
       this.props.isOpen
-        ? props.openMenuOffset * initialMenuPositionMultiplier
-        : props.hiddenMenuOffset,
+        ? 0
+        : props.hiddenMenuOffset - (props.openMenuOffset * initialMenuPositionMultiplier),
     );
 
     this.onLayoutChange = this.onLayoutChange.bind(this);
@@ -134,6 +137,7 @@ export default class SideMenu extends React.Component<SideMenuProps, SideMenuSta
       left,
       isOpen: this.props.isOpen,
       prevLeft: 0,
+      barrierForward: deviceScreen.width / 4,
     };
 
     this.state.left.addListener(({ value }) => {
@@ -142,9 +146,14 @@ export default class SideMenu extends React.Component<SideMenuProps, SideMenuSta
     });
   }
 
-  componentWillReceiveProps(props: SideMenuProps) {
-    if (this.props.isOpen && (props.autoClosing || !this.props.isOpen)) {
-      this.openMenu(this.props.isOpen);
+  componentWillReceiveProps(newProps: SideMenuProps) {
+    const { isOpen, hiddenMenuOffset, openMenuOffset, } = newProps;
+    if ((this.state.openMenuOffset != openMenuOffset) || (this.state.hiddenMenuOffset != hiddenMenuOffset)) {
+      this.setState({
+        ...this.state,
+        openMenuOffset, hiddenMenuOffset
+      })
+      this.moveLeft(isOpen ? openMenuOffset : hiddenMenuOffset)
     }
   }
 
@@ -170,19 +179,18 @@ export default class SideMenu extends React.Component<SideMenuProps, SideMenuSta
     const style = [
       styles.frontView,
       { width, height },
-      this.props.animationStyle(this.state.left),
     ];
 
     return (
-      <Animated.View style={style} {...this.responder.panHandlers}>
+      <View style={style} {...this.responder.panHandlers}>
         {this.props.children}
         {overlay}
-      </Animated.View>
+      </View>
     );
   }
 
   moveLeft(offset: number) {
-    const newOffset = this.menuPositionMultiplier() * offset;
+    const newOffset = this.menuPositionMultiplier() * (offset - this.state.openMenuOffset);
 
     this.props
       .animation(this.state.left, newOffset)
@@ -210,7 +218,7 @@ export default class SideMenu extends React.Component<SideMenuProps, SideMenuSta
     const offsetLeft = this.menuPositionMultiplier() *
       (this.publicLeft + gestureState.dx);
 
-    this.openMenu(shouldOpenMenu(offsetLeft));
+    this.openMenu(shouldOpenMenu(offsetLeft, this.state.barrierForward));
   }
 
   handleMoveShouldSetPanResponder(e: GestureResponderEvent, gestureState: PanResponderGestureState) {
@@ -225,7 +233,7 @@ export default class SideMenu extends React.Component<SideMenuProps, SideMenuSta
       }
 
       const withinEdgeHitWidth = this.props.menuPosition === 'right' ?
-        gestureState.moveX > (deviceScreen.width - this.props.edgeHitWidth) :
+        gestureState.moveX > (this.state.width - this.props.edgeHitWidth) :
         gestureState.moveX < this.props.edgeHitWidth;
 
       const swipingToOpen = this.menuPositionMultiplier() * gestureState.dx > 0;
@@ -246,15 +254,38 @@ export default class SideMenu extends React.Component<SideMenuProps, SideMenuSta
 
   gesturesAreEnabled = () => !this.props.disableGestures;
 
+  interpolateToPercentage(prop: Animated.Value) {
+    if (this.menuPositionMultiplier() > 0) {
+      return prop.interpolate({
+        inputRange: [0, this.props.openMenuOffset - this.props.hiddenMenuOffset],
+        outputRange: [0, 100]
+      });
+    } else {
+      // When the menu is on the right, the whole interpolation reverses
+      // in order to maintain the 0 to 100 scale intact. Again, the client
+      // should only care about the open ratio, not about directions.
+      return prop.interpolate({
+        inputRange: [this.props.hiddenMenuOffset - this.props.openMenuOffset, 0],
+        outputRange: [100, 0]
+      });
+    }
+  }
+
   render() {
     const boundryStyle = this.props.menuPosition === 'right' ?
       { left: this.state.width - this.state.openMenuOffset } :
       { right: this.state.width - this.state.openMenuOffset };
 
+    const menuProps = {
+      openPercentage: this.interpolateToPercentage(this.state.left)
+    };
+
     const menu = (
-      <View style={[styles.menu, boundryStyle]}>
-        {this.props.menu}
-      </View>
+      <Animated.View style={[styles.menu, boundryStyle,
+      this.props.animationStyle(this.state.left,
+        this.interpolateToPercentage(this.state.left))]}>
+        {React.cloneElement(this.props.menu, menuProps)}
+      </Animated.View>
     );
 
     return (
@@ -262,8 +293,8 @@ export default class SideMenu extends React.Component<SideMenuProps, SideMenuSta
         style={styles.container}
         onLayout={this.onLayoutChange}
       >
-        {menu}
         {this.getContentView()}
+        {menu}
       </View>
     );
   }
